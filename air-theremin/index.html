@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Air Theremin</title>
+<meta name="description" content="Play a theremin with your hands in front of your webcam. Right hand sets the pitch, left hand sets the volume." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎶</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Monoton&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --night: #120f2e;
+    --night-2: #1c1846;
+    --ink: #f3eedf;
+    --muted: #a59fc8;
+    --phosphor: #ffbf5e;
+    --line: rgba(243, 238, 223, 0.14);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--night);
+    color: var(--ink);
+    font-family: "Outfit", system-ui, sans-serif;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #stage { position: fixed; inset: 0; touch-action: none; }
+  #stage canvas { width: 100%; height: 100%; display: block; }
+  video { display: none; }
+
+  header {
+    position: fixed;
+    top: max(14px, env(safe-area-inset-top));
+    left: 20px;
+    right: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    pointer-events: none;
+  }
+  h1 {
+    margin: 0;
+    font-family: "Monoton", "Outfit", sans-serif;
+    font-weight: 400;
+    font-size: clamp(1.6rem, 4vw, 2.6rem);
+    letter-spacing: 0.02em;
+    color: var(--phosphor);
+    text-shadow: 0 0 18px rgba(255, 191, 94, 0.55);
+  }
+  #readout {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    min-height: 3.2em;
+  }
+  #note { font-size: clamp(1.8rem, 5vw, 3rem); font-weight: 600; line-height: 1; }
+  #hz { color: var(--muted); font-size: 0.95rem; margin-top: 4px; }
+
+  /* Intro card */
+  #intro {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: radial-gradient(ellipse at 50% 40%, rgba(28, 24, 70, 0.6), rgba(18, 15, 46, 0.94) 70%);
+  }
+  #intro[hidden] { display: none; }
+  .card { max-width: 30rem; text-align: center; }
+  .card h2 {
+    font-family: "Monoton", "Outfit", sans-serif;
+    font-weight: 400;
+    font-size: clamp(2.4rem, 9vw, 4.2rem);
+    margin: 0 0 0.3em;
+    color: var(--phosphor);
+    text-shadow: 0 0 26px rgba(255, 191, 94, 0.6);
+  }
+  .card p { color: var(--muted); font-size: 1.05rem; line-height: 1.55; margin: 0 0 1.2em; }
+  .hands {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 0 0 1.6em;
+    text-align: left;
+  }
+  .hands div { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .hands strong { display: block; font-size: 1.05rem; }
+  .hands span { color: var(--muted); font-size: 0.9rem; }
+
+  button, select {
+    font: inherit;
+    color: var(--ink);
+    background: var(--night-2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 10px 16px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 2px; }
+  .go {
+    background: var(--phosphor);
+    color: #2a1a00;
+    border: 0;
+    font-weight: 600;
+    font-size: 1.15rem;
+    padding: 14px 30px;
+    box-shadow: 0 0 30px rgba(255, 191, 94, 0.4);
+  }
+  .go:disabled { opacity: 0.6; cursor: wait; }
+  .small { font-size: 0.85rem; color: var(--muted); margin-top: 1em; }
+  #error { color: #ff9b8a; min-height: 1.4em; margin-top: 1em; }
+
+  /* Controls */
+  #controls {
+    position: fixed;
+    left: 50%;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 999px;
+    background: rgba(18, 15, 46, 0.72);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--line);
+    max-width: calc(100vw - 24px);
+  }
+  #controls[hidden] { display: none; }
+  #controls label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.85rem; padding-left: 8px; }
+  #rec.on { background: #e5484d; border-color: #e5484d; color: #fff; }
+  #rec .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #e5484d; margin-right: 6px; vertical-align: 1px; }
+  #rec.on .dot { background: #fff; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  #toast {
+    position: fixed;
+    left: 50%;
+    top: max(84px, calc(env(safe-area-inset-top) + 70px));
+    max-width: calc(100vw - 32px);
+    transform: translateX(-50%);
+    background: var(--night-2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 16px;
+    font-size: 0.9rem;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; pointer-events: auto; }
+  #toast a { color: var(--phosphor); }
+
+  header h1 { visibility: hidden; }
+  body.playing header h1 { visibility: visible; }
+
+  @media (max-width: 520px) {
+    #controls { gap: 6px; padding: 6px; flex-wrap: nowrap; }
+    #controls label { padding-left: 0; }
+    #controls label span { display: none; }
+    #controls select, #controls button { padding: 8px 10px; font-size: 0.85rem; }
+  }
+</style>
+</head>
+<body>
+  <video id="video" playsinline muted></video>
+  <div id="stage"><canvas id="canvas"></canvas></div>
+
+  <header>
+    <h1>air theremin</h1>
+    <div id="readout" aria-live="off"><div id="note"></div><div id="hz"></div></div>
+  </header>
+
+  <section id="intro">
+    <div class="card">
+      <h2>theremin</h2>
+      <p>The instrument you play without touching it. Hold your hands up in front of the camera and move them through the air.</p>
+      <div class="hands">
+        <div><strong>Right hand</strong><span>Higher is a higher note</span></div>
+        <div><strong>Left hand</strong><span>Higher is louder. Drop it to go quiet</span></div>
+      </div>
+      <button class="go" id="start" disabled>Loading…</button>
+      <div id="error" role="alert"></div>
+      <p class="small">Turn your sound up. Video stays on your device.<br />No camera? Drag on the screen instead.</p>
+    </div>
+  </section>
+
+  <nav id="controls" hidden aria-label="Instrument settings">
+    <label><span>Sound</span>
+      <select id="voice">
+        <option value="theremin">Theremin</option>
+        <option value="glass">Glass</option>
+        <option value="synth">Synth</option>
+        <option value="choir">Ghost choir</option>
+      </select>
+    </label>
+    <label><span>Notes</span>
+      <select id="scale">
+        <option value="glide">Glide</option>
+        <option value="pentatonic">Pentatonic</option>
+        <option value="major">Major scale</option>
+        <option value="chromatic">All notes</option>
+      </select>
+    </label>
+    <button id="rec" type="button"><span class="dot"></span><span id="recLabel">Record</span></button>
+  </nav>
+
+  <div id="toast" role="status"></div>
+
+<script type="module">
+/*
+  Air Theremin
+  Webcam -> MediaPipe hand tracking (21 points per hand) -> palm height
+  Right half of the screen: pitch.  Left half: volume.
+  Web Audio: oscillator -> filter -> volume -> dry + reverb -> speakers (and the recorder)
+*/
+
+const VISION_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2";
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+// ---------- Music ----------
+const LOW_FREQ = 130.81; // C3
+const OCTAVES = 3;       // C3 to C6
+const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+const SCALES = {
+  chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  major: [0, 2, 4, 5, 7, 9, 11],
+  pentatonic: [0, 2, 4, 7, 9],
+};
+
+const midiFromFreq = (f) => 69 + 12 * Math.log2(f / 440);
+const freqFromMidi = (m) => 440 * 2 ** ((m - 69) / 12);
+const noteName = (f) => {
+  const m = Math.round(midiFromFreq(f));
+  return NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+};
+
+/** Height 0 (bottom) .. 1 (top) -> frequency, exponential so each octave gets equal space. */
+function heightToFreq(t, scale) {
+  const free = LOW_FREQ * 2 ** (t * OCTAVES);
+  if (scale === "glide") return free;
+  return freqFromMidi(snapMidi(midiFromFreq(free), SCALES[scale]));
+}
+
+function snapMidi(m, steps) {
+  const octave = Math.floor(m / 12);
+  let best = m, bestDist = Infinity;
+  for (let o = octave - 1; o <= octave + 1; o++) {
+    for (const s of steps) {
+      const candidate = o * 12 + s;
+      const d = Math.abs(candidate - m);
+      if (d < bestDist) { best = candidate; bestDist = d; }
+    }
+  }
+  return best;
+}
+
+/** Note lines to draw for the current scale, within the playable range. */
+function scaleLines(scale) {
+  const steps = SCALES[scale === "glide" ? "chromatic" : scale];
+  const lo = midiFromFreq(LOW_FREQ), hi = lo + OCTAVES * 12;
+  const lines = [];
+  for (let m = Math.ceil(lo); m <= hi; m++) {
+    if (!steps.includes(((m % 12) + 12) % 12)) continue;
+    if (scale === "glide" && m % 12 !== 0) continue; // just the Cs, as landmarks
+    lines.push({ m, t: (m - lo) / (OCTAVES * 12), name: noteName(freqFromMidi(m)) });
+  }
+  return lines;
+}
+
+// ---------- Audio ----------
+class Synth {
+  constructor() {
+    const ctx = (this.ctx = new AudioContext());
+    this.osc = ctx.createOscillator();
+    this.osc2 = ctx.createOscillator(); // detuned partner, only for some voices
+    this.osc2Gain = ctx.createGain();
+    this.lfo = ctx.createOscillator();
+    this.lfoDepth = ctx.createGain();
+    this.filter = ctx.createBiquadFilter();
+    this.amp = ctx.createGain();
+    this.dry = ctx.createGain();
+    this.wet = ctx.createGain();
+    this.reverb = ctx.createConvolver();
+    this.master = ctx.createGain();
+    this.analyser = ctx.createAnalyser();
+    this.recordDest = ctx.createMediaStreamDestination();
+
+    this.lfo.frequency.value = 5.6;            // vibrato speed
+    this.lfo.connect(this.lfoDepth);
+    this.lfoDepth.connect(this.osc.frequency);
+    this.lfoDepth.connect(this.osc2.frequency);
+
+    this.osc.connect(this.filter);
+    this.osc2.connect(this.osc2Gain).connect(this.filter);
+    this.filter.connect(this.amp);
+    this.amp.connect(this.dry).connect(this.master);
+    this.amp.connect(this.reverb).connect(this.wet).connect(this.master);
+    this.master.connect(this.analyser);
+    this.analyser.connect(ctx.destination);
+    this.analyser.connect(this.recordDest);
+
+    this.analyser.fftSize = 2048;
+    this.reverb.buffer = this.makeImpulse(2.8);
+    this.amp.gain.value = 0;
+    this.master.gain.value = 0.8;
+    this.wave = new Float32Array(this.analyser.fftSize);
+
+    this.setVoice("theremin");
+    this.osc.start(); this.osc2.start(); this.lfo.start();
+  }
+
+  makeImpulse(seconds) {
+    const rate = this.ctx.sampleRate, len = Math.floor(rate * seconds);
+    const buf = this.ctx.createBuffer(2, len, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3;
+    }
+    return buf;
+  }
+
+  setVoice(name) {
+    const now = this.ctx.currentTime;
+    this.voice = name;
+    const harmonics = (amps) => {
+      const real = new Float32Array(amps.length + 1), imag = new Float32Array(amps.length + 1);
+      amps.forEach((a, i) => (imag[i + 1] = a));
+      return this.ctx.createPeriodicWave(real, imag);
+    };
+    const v = {
+      // A real theremin is close to a sine wave with a little edge to it
+      theremin: { wave: harmonics([1, 0.32, 0.14, 0.07, 0.035]), osc2: 0, cutoff: 4200, vibrato: 0.006, wet: 0.35 },
+      glass: { type: "triangle", osc2: 0.25, detune: 1200, cutoff: 7000, vibrato: 0.002, wet: 0.55 },
+      synth: { type: "sawtooth", osc2: 0.6, detune: 9, cutoff: 1800, vibrato: 0.003, wet: 0.25 },
+      choir: { wave: harmonics([1, 0.5, 0.42, 0.1, 0.18, 0.05]), osc2: 0.7, detune: 14, cutoff: 1500, vibrato: 0.009, wet: 0.65 },
+    }[name];
+    for (const o of [this.osc, this.osc2]) {
+      if (v.wave) o.setPeriodicWave(v.wave); else o.type = v.type;
+    }
+    this.osc2.detune.setValueAtTime(v.detune ?? 0, now);
+    this.osc2Gain.gain.setTargetAtTime(v.osc2, now, 0.05);
+    this.filter.frequency.setTargetAtTime(v.cutoff, now, 0.05);
+    this.filter.Q.value = name === "synth" ? 4 : 0.7;
+    this.wet.gain.setTargetAtTime(v.wet, now, 0.1);
+    this.dry.gain.setTargetAtTime(1 - v.wet * 0.5, now, 0.1);
+    this.vibrato = v.vibrato;
+    this.baseCutoff = v.cutoff;
+  }
+
+  /** Called every frame. Short time constants give the smooth glide a theremin is known for. */
+  update(freq, volume, glide) {
+    const now = this.ctx.currentTime;
+    this.osc.frequency.setTargetAtTime(freq, now, glide);
+    this.osc2.frequency.setTargetAtTime(freq, now, glide);
+    this.lfoDepth.gain.setTargetAtTime(freq * this.vibrato, now, 0.1);
+    this.amp.gain.setTargetAtTime(volume * 0.5, now, 0.04);
+    if (this.voice === "synth") this.filter.frequency.setTargetAtTime(this.baseCutoff * (0.5 + volume * 1.8), now, 0.05);
+  }
+
+  level() {
+    this.analyser.getFloatTimeDomainData(this.wave);
+    let sum = 0;
+    for (const s of this.wave) sum += s * s;
+    return Math.sqrt(sum / this.wave.length);
+  }
+}
+
+// ---------- State ----------
+const $ = (id) => document.getElementById(id);
+const canvas = $("canvas"), ctx = canvas.getContext("2d");
+const video = $("video");
+const state = {
+  synth: null,
+  landmarker: null,
+  scale: "glide",
+  pitchT: 0.5, volT: 0,         // smoothed hand heights, 0..1
+  pitchHand: null, volHand: null, // latest palm positions in screen space (0..1)
+  pitchSeen: 0, volSeen: 0,     // last time each hand was seen (ms)
+  pointer: null,                // mouse/touch fallback
+  freq: LOW_FREQ * 2, volume: 0,
+  trail: [],
+  camera: false,
+  lastVideoTime: -1,
+  dpr: 1, w: 0, h: 0,
+};
+
+// Hands are detected in a mirrored view, so "your right hand" appears on the right.
+const PALM = [0, 5, 9, 13, 17];
+const palmOf = (lm) => ({
+  x: 1 - PALM.reduce((s, i) => s + lm[i].x, 0) / PALM.length,
+  y: PALM.reduce((s, i) => s + lm[i].y, 0) / PALM.length,
+});
+// Comfortable playing range: hands rarely reach the very top or bottom of the frame
+const heightOf = (y) => Math.min(1, Math.max(0, (0.88 - y) / 0.72));
+
+// ---------- Setup ----------
+function resize() {
+  state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+  state.w = window.innerWidth; state.h = window.innerHeight;
+  canvas.width = Math.round(state.w * state.dpr);
+  canvas.height = Math.round(state.h * state.dpr);
+}
+addEventListener("resize", resize);
+resize();
+
+async function loadModel() {
+  try {
+    const { HandLandmarker, FilesetResolver } = await import(`${VISION_URL}/vision_bundle.mjs`);
+    const files = await FilesetResolver.forVisionTasks(`${VISION_URL}/wasm`);
+    const make = (delegate) => HandLandmarker.createFromOptions(files, {
+      baseOptions: { modelAssetPath: MODEL_URL, delegate },
+      runningMode: "VIDEO",
+      numHands: 2,
+      minHandDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.5,
+    });
+    state.landmarker = await make("GPU").catch(() => make("CPU"));
+  } catch (err) {
+    console.warn("Hand tracking unavailable", err);
+  }
+  $("start").disabled = false;
+  $("start").textContent = state.landmarker ? "Start playing" : "Start (mouse mode)";
+  if (!state.landmarker) $("error").textContent = "Couldn't load hand tracking. You can still play by dragging on the screen.";
+}
+
+$("start").addEventListener("click", async () => {
+  $("start").disabled = true;
+  state.synth = new Synth();
+  await state.synth.ctx.resume();
+
+  if (state.landmarker && navigator.mediaDevices?.getUserMedia) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await video.play();
+      state.camera = true;
+    } catch (err) {
+      console.warn(err);
+      toast("No camera, so it's mouse mode: drag on the right to play, left side sets the volume.");
+    }
+  } else {
+    toast("Mouse mode: drag on the right to play, left side sets the volume.");
+  }
+
+  $("intro").hidden = true;
+  document.body.classList.add("playing");
+  $("controls").hidden = false;
+  requestAnimationFrame(frame);
+});
+
+$("voice").addEventListener("change", (e) => state.synth?.setVoice(e.target.value));
+$("scale").addEventListener("change", (e) => (state.scale = e.target.value));
+
+// Mouse / touch fallback: right side = pitch, left side = volume
+const stage = $("stage");
+const pointerAt = (e) => ({ x: e.clientX / state.w, y: e.clientY / state.h });
+stage.addEventListener("pointerdown", (e) => { stage.setPointerCapture(e.pointerId); state.pointer = { ...pointerAt(e), id: e.pointerId }; });
+stage.addEventListener("pointermove", (e) => { if (state.pointer?.id === e.pointerId) state.pointer = { ...pointerAt(e), id: e.pointerId }; });
+const endPointer = (e) => { if (state.pointer?.id === e.pointerId) state.pointer = null; };
+stage.addEventListener("pointerup", endPointer);
+stage.addEventListener("pointercancel", endPointer);
+
+// ---------- Main loop ----------
+function frame(now) {
+  detectHands(now);
+  playFromHands(now);
+  draw(now);
+  requestAnimationFrame(frame);
+}
+
+function detectHands(now) {
+  if (!state.camera || video.readyState < 2 || video.currentTime === state.lastVideoTime) return;
+  state.lastVideoTime = video.currentTime;
+  const res = state.landmarker.detectForVideo(video, now);
+  state.hands = res.landmarks;
+
+  for (const lm of res.landmarks) {
+    const palm = palmOf(lm);
+    if (palm.x >= 0.5) { state.pitchHand = { ...palm, lm }; state.pitchSeen = now; }
+    else { state.volHand = { ...palm, lm }; state.volSeen = now; }
+  }
+}
+
+function playFromHands(now) {
+  const p = state.pointer;
+  if (p && p.x >= 0.5) { state.pitchHand = { x: p.x, y: p.y }; state.pitchSeen = now; }
+  if (p && p.x < 0.5) { state.volHand = { x: p.x, y: p.y }; state.volSeen = now; }
+
+  const pitchActive = now - state.pitchSeen < 180;
+  const volActive = now - state.volSeen < 180;
+
+  // Smooth out tracking jitter, but stay quick enough to feel live
+  if (pitchActive) state.pitchT += (heightOf(state.pitchHand.y) - state.pitchT) * 0.45;
+  if (volActive) state.volT += (heightOf(state.volHand.y) - state.volT) * 0.35;
+  else if (state.volSeen && state.volHand && state.volHand.y > 0.8) state.volT *= 0.85; // left the frame at the bottom: fade out
+
+  state.freq = heightToFreq(state.pitchT, state.scale);
+  // Volume works like a knob: it stays where your left hand last left it, so dropping that
+  // hand out of the bottom of the frame keeps it quiet. Never used the left hand? Play at a
+  // comfortable level so it works one-handed.
+  const usedVolumeHand = state.volSeen > 0;
+  const vol = !pitchActive ? 0 : usedVolumeHand ? state.volT ** 1.4 : 0.55;
+  state.volume = vol;
+
+  state.synth.update(state.freq, vol, state.scale === "glide" ? 0.03 : 0.012);
+
+  if (pitchActive) {
+    state.trail.push({ x: state.pitchHand.x, y: state.pitchHand.y, t: now, v: vol });
+  }
+  while (state.trail.length && now - state.trail[0].t > 1400) state.trail.shift();
+
+  $("note").textContent = pitchActive && vol > 0.02 ? noteName(state.freq) : "";
+  $("hz").textContent = pitchActive && vol > 0.02 ? `${state.freq.toFixed(1)} Hz` : state.camera ? "Raise your right hand" : "Drag on the right side";
+}
+
+// ---------- Drawing ----------
+const hueFor = (t) => 280 - t * 250; // low notes violet, high notes amber-gold
+
+function draw(now) {
+  const { w, h, dpr } = state;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // Camera, mirrored and dimmed so the light show reads on top
+  ctx.fillStyle = "#120f2e";
+  ctx.fillRect(0, 0, w, h);
+  if (state.camera && video.videoWidth) {
+    const s = Math.max(w / video.videoWidth, h / video.videoHeight);
+    const vw = video.videoWidth * s, vh = video.videoHeight * s;
+    ctx.save();
+    ctx.globalAlpha = 0.32;
+    ctx.filter = "grayscale(1) contrast(1.1)";
+    ctx.translate(w, 0); ctx.scale(-1, 1);
+    ctx.drawImage(video, (w - vw) / 2, (h - vh) / 2, vw, vh);
+    ctx.restore();
+    ctx.filter = "none";
+  }
+  const glow = ctx.createRadialGradient(w * 0.75, h * 0.5, 0, w * 0.75, h * 0.5, Math.max(w, h) * 0.7);
+  glow.addColorStop(0, `hsla(${hueFor(state.pitchT)}, 80%, 55%, ${0.06 + state.volume * 0.18})`);
+  glow.addColorStop(1, "rgba(18,15,46,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, w, h);
+
+  // Zone divider
+  ctx.strokeStyle = "rgba(243,238,223,0.10)";
+  ctx.setLineDash([4, 8]);
+  ctx.beginPath(); ctx.moveTo(w / 2, h * 0.12); ctx.lineTo(w / 2, h * 0.88); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Note lines on the pitch side
+  const yForT = (t) => h * (0.88 - t * 0.72);
+  ctx.font = `500 ${Math.max(11, Math.min(14, w / 70))}px Outfit, sans-serif`;
+  ctx.textBaseline = "middle";
+  for (const line of scaleLines(state.scale)) {
+    const y = yForT(line.t);
+    const isC = line.name.startsWith("C") && !line.name.includes("♯");
+    ctx.strokeStyle = `rgba(243,238,223,${isC ? 0.16 : 0.07})`;
+    ctx.beginPath(); ctx.moveTo(w * 0.52, y); ctx.lineTo(w - 46, y); ctx.stroke();
+    ctx.fillStyle = `rgba(243,238,223,${isC ? 0.55 : 0.3})`;
+    ctx.fillText(line.name, w - 40, y);
+  }
+
+  // The "antenna" on the right and the volume loop on the left, like a real theremin
+  const antennaX = w - 14;
+  const ag = ctx.createLinearGradient(0, h * 0.1, 0, h * 0.9);
+  ag.addColorStop(0, "rgba(255,191,94,0.9)"); ag.addColorStop(1, "rgba(255,191,94,0.1)");
+  ctx.strokeStyle = ag; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(antennaX, h * 0.1); ctx.lineTo(antennaX, h * 0.9); ctx.stroke();
+  ctx.lineWidth = 1;
+
+  const barX = 16, barTop = h * 0.16, barH = h * 0.72 - h * 0.04;
+  ctx.fillStyle = "rgba(243,238,223,0.08)";
+  roundRect(barX, barTop, 8, barH, 4); ctx.fill();
+  ctx.fillStyle = `hsl(${hueFor(state.pitchT)}, 90%, 65%)`;
+  const filled = barH * state.volume;
+  roundRect(barX, barTop + barH - filled, 8, filled, 4); ctx.fill();
+  ctx.save();
+  ctx.translate(barX + 22, h * 0.5); ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = "rgba(243,238,223,0.4)"; ctx.textAlign = "center";
+  ctx.fillText("volume", 0, 0);
+  ctx.restore();
+  ctx.textAlign = "left";
+
+  // Faint hand skeletons
+  if (state.camera && state.hands) {
+    ctx.strokeStyle = "rgba(243,238,223,0.28)";
+    ctx.lineWidth = 1.5;
+    for (const lm of state.hands) {
+      for (const [a, b] of HAND_CONNECTIONS) {
+        ctx.beginPath();
+        ctx.moveTo((1 - lm[a].x) * w, lm[a].y * h);
+        ctx.lineTo((1 - lm[b].x) * w, lm[b].y * h);
+        ctx.stroke();
+      }
+    }
+    ctx.lineWidth = 1;
+  }
+
+  // Light trail of the pitch hand
+  const trail = state.trail;
+  ctx.lineCap = "round";
+  for (let i = 1; i < trail.length; i++) {
+    const a = trail[i - 1], b = trail[i];
+    const age = 1 - (now - b.t) / 1400;
+    if (b.t - a.t > 200) continue;
+    ctx.strokeStyle = `hsla(${hueFor(heightOf(b.y))}, 95%, 65%, ${age * (0.25 + b.v * 0.75)})`;
+    ctx.lineWidth = 2 + age * 10 * (0.3 + b.v);
+    ctx.beginPath(); ctx.moveTo(a.x * w, a.y * h); ctx.lineTo(b.x * w, b.y * h); ctx.stroke();
+  }
+  ctx.lineWidth = 1;
+
+  // Orbs
+  const pitchActive = now - state.pitchSeen < 180;
+  const volActive = now - state.volSeen < 180;
+  if (pitchActive) orb(state.pitchHand.x * w, state.pitchHand.y * h, 18 + state.volume * 34, hueFor(state.pitchT), 1);
+  if (volActive) orb(state.volHand.x * w, state.volHand.y * h, 14, 40, 0.5);
+
+  // Oscilloscope across the bottom
+  if (state.synth) {
+    const level = state.synth.level();
+    const wave = state.synth.wave;
+    const y0 = h * 0.9, amp = h * 0.08;
+    // Find a rising zero crossing so the waveform stands still instead of jittering
+    let start = 0;
+    for (let i = 1; i < wave.length / 2; i++) if (wave[i - 1] < 0 && wave[i] >= 0) { start = i; break; }
+    const n = 700;
+    ctx.strokeStyle = `hsla(${hueFor(state.pitchT)}, 90%, 70%, ${0.25 + Math.min(1, level * 6) * 0.6})`;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = `hsl(${hueFor(state.pitchT)}, 90%, 60%)`;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * w;
+      const y = y0 - wave[(start + i) % wave.length] * amp * 2.2;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1;
+  }
+}
+
+function orb(x, y, r, hue, alpha) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.4);
+  g.addColorStop(0, `hsla(${hue}, 100%, 85%, ${alpha})`);
+  g.addColorStop(0.25, `hsla(${hue}, 95%, 62%, ${alpha * 0.8})`);
+  g.addColorStop(1, `hsla(${hue}, 90%, 50%, 0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r * 2.4, 0, Math.PI * 2); ctx.fill();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(x, y, w, h, Math.min(r, h / 2)) : ctx.rect(x, y, w, h);
+}
+
+// MediaPipe's 21-point hand: wrist, then 4 joints per finger
+const HAND_CONNECTIONS = [
+  [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [0, 17], [17, 18], [18, 19], [19, 20],
+];
+
+// ---------- Recording ----------
+let recorder = null, chunks = [], recStart = 0, recTimer = null;
+
+$("rec").addEventListener("click", () => (recorder ? stopRecording() : startRecording()));
+
+function startRecording() {
+  const type = ["video/mp4;codecs=avc1,mp4a", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+    .find((t) => window.MediaRecorder?.isTypeSupported(t));
+  if (!type) { toast("Recording isn't supported in this browser."); return; }
+
+  const stream = new MediaStream([
+    ...canvas.captureStream(30).getVideoTracks(),
+    ...state.synth.recordDest.stream.getAudioTracks(),
+  ]);
+  recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 4_000_000 });
+  chunks = [];
+  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    const ext = type.startsWith("video/mp4") ? "mp4" : "webm";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `air-theremin-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${ext}`;
+    a.click();
+    toast(`Saved your clip. <a href="${url}" download="${a.download}">Download again</a>`, 6000);
+    recorder = null;
+  };
+  recorder.start(250);
+  recStart = performance.now();
+  $("rec").classList.add("on");
+  recTimer = setInterval(() => {
+    const s = Math.floor((performance.now() - recStart) / 1000);
+    $("recLabel").textContent = `Stop 0:${String(s).padStart(2, "0")}`;
+    if (s >= 59) stopRecording();
+  }, 250);
+  $("recLabel").textContent = "Stop 0:00";
+}
+
+function stopRecording() {
+  clearInterval(recTimer);
+  recorder?.stop();
+  $("rec").classList.remove("on");
+  $("recLabel").textContent = "Record";
+}
+
+// ---------- Misc ----------
+let toastTimer;
+function toast(html, ms = 4000) {
+  const t = $("toast");
+  t.innerHTML = html;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), ms);
+}
+
+// Exposed for testing in the browser console
+window.theremin = { state, heightToFreq, noteName, snapMidi };
+
+loadModel();
+</script>
+</body>
+</html>
